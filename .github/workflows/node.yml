@@ -1,10 +1,17 @@
 name: Node.js CI
 
-on: [push, pull_request]
+on:
+  workflow_dispatch:
+    inputs:
+      test-filter:
+        description: "Jest test path pattern to run; empty runs the full suite"
+        required: false
+        default: ""
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     strategy:
       matrix:
@@ -12,17 +19,54 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v2
+        uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-      - run: npm install
-      - run: npm run lint
-      - run: npm run check-types
-      - run: npm run test
-      - run: npm run size
 
-      - name: Code coverage report
-        uses: codecov/codecov-action@v1
+      - name: Pin the npm registry to the release date
+        run: |
+          npm config set registry https://time-machines-npm.sealsecurity.io/
+          npm config set //time-machines-npm.sealsecurity.io/:_authToken=2022-08-10T13:52:12.556000Z
+
+      - run: npm install
+      - run: npm run test -- ${{ inputs.test-filter }}
+
+  # Reproduces the upstream `release` script (build -> copy metadata into dist ->
+  # publish dist) up to the point of publishing: the public tarball is packed
+  # from ./dist, not from the repo root.
+  pack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 14.18.2
+        uses: actions/setup-node@v4
+        with:
+          node-version: 14.18.2
+
+      - name: Pin the npm registry to the release date
+        run: |
+          npm config set registry https://time-machines-npm.sealsecurity.io/
+          npm config set //time-machines-npm.sealsecurity.io/:_authToken=2022-08-10T13:52:12.556000Z
+
+      - run: npm install
+      - run: npm run build
+      - name: Copy package metadata into dist
+        run: |
+          cp *.json dist
+          cp *.md dist
+      - name: Pack dist
+        run: npm pack ./dist
+
+      - name: Upload tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: colord-tarball
+          path: colord-2.9.3.tgz
+          if-no-files-found: error
